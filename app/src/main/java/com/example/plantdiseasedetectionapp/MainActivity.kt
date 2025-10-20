@@ -50,7 +50,10 @@ fun PlantGuardApp() {
         composable("history") {
             HistoryScreen(navController = navController)
         }
-        // TODO: Add a route for the results screen, e.g., composable("result/{prediction}") { ... }
+        composable("result/{prediction}") { backStackEntry ->
+            val prediction = backStackEntry.arguments?.getString("prediction") ?: "No prediction"
+            ResultScreen(navController = navController, prediction = prediction)
+        }
     }
 }
 
@@ -121,7 +124,11 @@ fun UploadScreen(navController: NavController) {
 
             // Analyze button is enabled only when an image is selected
             Button(
-                onClick = { /* TODO: Implement analysis logic and navigate to result screen */ },
+                onClick = {
+                    // For now, we'll navigate with a dummy prediction.
+                    // TODO: Replace with actual model inference.
+                    navController.navigate("result/Potato___Early_blight")
+                },
                 enabled = imageUri != null
             ) {
                 Text("Analyze")

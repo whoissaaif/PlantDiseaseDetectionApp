@@ -35,7 +35,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.plantdiseasedetectionapp.ui.theme.PlantDiseaseDetectionAppTheme
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
@@ -183,7 +182,6 @@ fun UploadScreen(navController: NavController) {
 fun analyzeImage(context: Context, bitmap: Bitmap): String {
     try {
         val modelName = "model.tflite"
-        val labelsName = "labels.txt"
 
         // Load TFLite model
         val assetFileDescriptor = context.assets.openFd(modelName)
@@ -194,8 +192,8 @@ fun analyzeImage(context: Context, bitmap: Bitmap): String {
         val modelBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
         val interpreter = Interpreter(modelBuffer)
 
-        // Load labels
-        val labels = FileUtil.loadLabels(context, labelsName)
+        // Manually load labels from labels.txt
+        val labels = context.assets.open("labels.txt").bufferedReader().useLines { it.toList() }
 
         // Get model input and output details
         val inputTensor = interpreter.getInputTensor(0)

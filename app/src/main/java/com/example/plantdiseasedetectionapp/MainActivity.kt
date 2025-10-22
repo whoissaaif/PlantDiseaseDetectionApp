@@ -34,9 +34,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.plantdiseasedetectionapp.ui.theme.PlantDiseaseDetectionAppTheme
+import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.support.common.FileUtil
+import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.classifier.ImageClassifier
+import org.tensorflow.lite.support.image.ops.ResizeOp
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +66,7 @@ fun PlantGuardApp() {
             HistoryScreen(navController = navController)
         }
         composable("result/{prediction}") { backStackEntry ->
-            val prediction = backStackEntry.arguments?.getString("prediction") ?: "No prediction"
+            val prediction = backStackEntry.arguments?.getString("prediction")?.replace("_", " ") ?: "No prediction"
             ResultScreen(navController = navController, prediction = prediction)
         }
     }
@@ -176,26 +181,55 @@ fun UploadScreen(navController: NavController) {
 }
 
 fun analyzeImage(context: Context, bitmap: Bitmap): String {
-    return try {
-        val baseOptions = BaseOptions.builder().setNumThreads(4).build()
-        val options = ImageClassifier.ImageClassifierOptions.builder()
-            .setBaseOptions(baseOptions)
-            .setMaxResults(1)
+    try {
+        val modelName = "model.tflite"
+        val labelsName = "labels.txt"
+
+        // Load TFLite model
+        val assetFileDescriptor = context.assets.openFd(modelName)
+        val fileInputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
+        val fileChannel = fileInputStream.channel
+        val startOffset = assetFileDescriptor.startOffset
+        val declaredLength = assetFileDescriptor.declaredLength
+        val modelBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+        val interpreter = Interpreter(modelBuffer)
+
+        // Load labels
+        val labels = FileUtil.loadLabels(context, labelsName)
+
+        // Get model input and output details
+        val inputTensor = interpreter.getInputTensor(0)
+        val outputTensor = interpreter.getOutputTensor(0)
+        val inputShape = inputTensor.shape()
+        val inputHeight = inputShape[1]
+        val inputWidth = inputShape[2]
+
+        // Preprocess the image
+        val imageProcessor = ImageProcessor.Builder()
+            .add(ResizeOp(inputHeight, inputWidth, ResizeOp.ResizeMethod.BILINEAR))
             .build()
-        val classifier = ImageClassifier.createFromFileAndOptions(
-            context,
-            "model.tflite",
-            options
-        )
 
-        val image = TensorImage.fromBitmap(bitmap)
+        var tensorImage = TensorImage(inputTensor.dataType())
+        tensorImage.load(bitmap)
+        tensorImage = imageProcessor.process(tensorImage)
 
-        val results = classifier.classify(image)
+        // Run inference
+        val outputBuffer = Array(1) { FloatArray(outputTensor.shape()[1]) }
+        interpreter.run(tensorImage.buffer, outputBuffer)
 
-        results.firstOrNull()?.categories?.firstOrNull()?.label ?: "Analysis failed"
+        // Process the output
+        val probabilities = outputBuffer[0]
+        val maxIndex = probabilities.indices.maxByOrNull { probabilities[it] } ?: -1
+
+        return if (maxIndex != -1 && maxIndex < labels.size) {
+            labels[maxIndex]
+        } else {
+            "Prediction failed"
+        }
+
     } catch (e: Exception) {
         Log.e("AnalyzeImage", "Error analyzing image", e)
-        "Error during analysis"
+        return e.message ?: "An unknown error occurred"
     }
 }
 

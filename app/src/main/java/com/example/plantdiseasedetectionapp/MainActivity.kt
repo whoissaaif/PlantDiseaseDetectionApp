@@ -1,6 +1,8 @@
 
 package com.example.plantdiseasedetectionapp
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -27,6 +29,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.plantdiseasedetectionapp.ui.theme.PlantDiseaseDetectionAppTheme
+import org.tensorflow.lite.support.image.TensorImage
+import org.tensorflow.lite.task.core.BaseOptions
+import org.tensorflow.lite.task.vision.classifier.ImageClassifier
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,10 +98,11 @@ fun UploadScreen(navController: NavController) {
             verticalArrangement = Arrangement.Center
         ) {
             // Display the selected image or a placeholder text
+            var bitmap: Bitmap? = null
             if (imageUri != null) {
                 // Decode the image URI to a Bitmap to display it
                 val inputStream = context.contentResolver.openInputStream(imageUri!!)
-                val bitmap = BitmapFactory.decodeStream(inputStream)
+                bitmap = BitmapFactory.decodeStream(inputStream)
                 Image(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = "Selected image",
@@ -125,9 +131,10 @@ fun UploadScreen(navController: NavController) {
             // Analyze button is enabled only when an image is selected
             Button(
                 onClick = {
-                    // For now, we'll navigate with a dummy prediction.
-                    // TODO: Replace with actual model inference.
-                    navController.navigate("result/Potato___Early_blight")
+                    bitmap?.let { bm ->
+                        val prediction = analyzeImage(context, bm)
+                        navController.navigate("result/$prediction")
+                    }
                 },
                 enabled = imageUri != null
             ) {
@@ -135,6 +142,27 @@ fun UploadScreen(navController: NavController) {
             }
         }
     }
+}
+
+fun analyzeImage(context: Context, bitmap: Bitmap): String {
+    val baseOptions = BaseOptions.builder().useGpu().build()
+    val options = ImageClassifier.ImageClassifierOptions.builder()
+        .setBaseOptions(baseOptions)
+        .setMaxResults(1)
+        .build()
+    val classifier = ImageClassifier.createFromFileAndOptions(
+        context,
+        "model.tflite",
+        options
+    )
+
+    val image = TensorImage.fromBitmap(bitmap)
+
+    val results = classifier.classify(image)
+
+    val result = results.firstOrNull()?.categories?.firstOrNull()?.label ?: "Unknown"
+
+    return result
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

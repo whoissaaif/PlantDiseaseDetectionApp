@@ -1,15 +1,19 @@
 
 package com.example.plantdiseasedetectionapp
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -24,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -65,14 +70,32 @@ fun PlantGuardApp() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UploadScreen(navController: NavController) {
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     val context = LocalContext.current
 
-    // Creates a launcher to open the device's gallery for image selection
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->
-            imageUri = uri
+            uri?.let {
+                val inputStream = context.contentResolver.openInputStream(it)
+                bitmap = BitmapFactory.decodeStream(inputStream)
+            }
+        }
+    )
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview(),
+        onResult = { newBitmap: Bitmap? ->
+            bitmap = newBitmap
+        }
+    )
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted: Boolean ->
+            if (isGranted) {
+                cameraLauncher.launch()
+            }
         }
     )
 
@@ -98,13 +121,9 @@ fun UploadScreen(navController: NavController) {
             verticalArrangement = Arrangement.Center
         ) {
             // Display the selected image or a placeholder text
-            var bitmap: Bitmap? = null
-            if (imageUri != null) {
-                // Decode the image URI to a Bitmap to display it
-                val inputStream = context.contentResolver.openInputStream(imageUri!!)
-                bitmap = BitmapFactory.decodeStream(inputStream)
+            if (bitmap != null) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = bitmap!!.asImageBitmap(),
                     contentDescription = "Selected image",
                     modifier = Modifier
                         .height(300.dp)
@@ -118,7 +137,19 @@ fun UploadScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // Buttons for user actions
-            Button(onClick = { /* TODO: Implement camera logic */ }) {
+            Button(onClick = {
+                when (PackageManager.PERMISSION_GRANTED) {
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.CAMERA
+                    ) -> {
+                        cameraLauncher.launch()
+                    }
+                    else -> {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                }
+            }) {
                 Text("Take Photo")
             }
 
@@ -136,7 +167,7 @@ fun UploadScreen(navController: NavController) {
                         navController.navigate("result/$prediction")
                     }
                 },
-                enabled = imageUri != null
+                enabled = bitmap != null
             ) {
                 Text("Analyze")
             }
@@ -145,24 +176,27 @@ fun UploadScreen(navController: NavController) {
 }
 
 fun analyzeImage(context: Context, bitmap: Bitmap): String {
-    val baseOptions = BaseOptions.builder().useGpu().build()
-    val options = ImageClassifier.ImageClassifierOptions.builder()
-        .setBaseOptions(baseOptions)
-        .setMaxResults(1)
-        .build()
-    val classifier = ImageClassifier.createFromFileAndOptions(
-        context,
-        "model.tflite",
-        options
-    )
+    return try {
+        val baseOptions = BaseOptions.builder().setNumThreads(4).build()
+        val options = ImageClassifier.ImageClassifierOptions.builder()
+            .setBaseOptions(baseOptions)
+            .setMaxResults(1)
+            .build()
+        val classifier = ImageClassifier.createFromFileAndOptions(
+            context,
+            "model.tflite",
+            options
+        )
 
-    val image = TensorImage.fromBitmap(bitmap)
+        val image = TensorImage.fromBitmap(bitmap)
 
-    val results = classifier.classify(image)
+        val results = classifier.classify(image)
 
-    val result = results.firstOrNull()?.categories?.firstOrNull()?.label ?: "Unknown"
-
-    return result
+        results.firstOrNull()?.categories?.firstOrNull()?.label ?: "Analysis failed"
+    } catch (e: Exception) {
+        Log.e("AnalyzeImage", "Error analyzing image", e)
+        "Error during analysis"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
